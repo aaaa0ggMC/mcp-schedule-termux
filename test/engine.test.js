@@ -169,3 +169,45 @@ test('reimport replaces the whole entry and only carries over selection state',t
   const saved=e.store.snapshot().get('cpp');
   assert.equal(saved.notes,'');assert.deepEqual(saved.tags,[]);assert.equal(saved.enabled,true);
 });
+
+test('empty filter values mean "no filter" instead of matching nothing',t=>{
+  const e=setup(t);
+  e.mutate({operations:[{op:'put',entity:course},{op:'put',entity:{id:'meeting',kind:'event',title:'例会',date:'2026-09-15',slot:'evening'}}]});
+  const base=e.query({...q,views:['agenda','catalog','config']});
+  assert.deepEqual(base.views.catalog.map(e=>e.id),['autumn','cpp','meeting']);assert.equal(base.views.config.length,1);
+  // ids:[], kinds:[], search:"" and simulateEnable:[] are what a serialised tool call looks like
+  // when nothing is being narrowed; they must behave exactly like an omitted parameter.
+  const empty=e.query({...q,views:['agenda','catalog','config'],ids:[],kinds:[],search:'',simulateEnable:[]});
+  assert.deepEqual(empty.views.agenda,base.views.agenda);
+  assert.deepEqual(empty.views.catalog,base.views.catalog);
+  assert.equal(empty.views.config.length,1);
+  // An empty views list falls back to the default view rather than answering with nothing.
+  const noViews=e.query({from:'2026-09-14',to:'2026-09-21',views:[]});
+  assert.deepEqual(noViews.views.agenda,base.views.agenda);
+  // Real values still filter, and a course-only filter empties config on purpose (no term is a course).
+  assert.equal(e.query({...q,views:['catalog'],ids:['cpp']}).views.catalog.length,1);
+  assert.equal(e.query({...q,views:['config'],scheduleStatus:'scheduled'}).views.config.length,0);
+});
+
+test('a matched-by-nothing reference filter is reported and ignored, not answered with nothing',t=>{
+  const e=setup(t);
+  e.mutate({operations:[{op:'put',entity:course},{op:'put',entity:{id:'meeting',kind:'event',title:'例会',date:'2026-09-15',slot:'evening'}}]});
+  const base=e.query({...q,views:['agenda','catalog','config']});
+  // The placeholder a model invents to "fill" a required looking field must not blank the query.
+  const placeholder=e.query({...q,views:['agenda','catalog','config'],termId:'.'});
+  assert.deepEqual(placeholder.views.agenda,base.views.agenda);
+  assert.equal(placeholder.views.config.length,1);
+  assert.deepEqual(placeholder.ignoredFilters,{termId:'.'});
+  assert.match(placeholder.coverage.message,/忽略无法匹配的展示过滤器/);
+  assert.match(placeholder.coverage.message,/autumn/);
+  // termId accepts a unique title as well as the ID, and both still filter.
+  assert.equal(e.query({...q,views:['config'],termId:'autumn'}).views.config.length,1);
+  assert.equal(e.query({...q,views:['config'],termId:'2026秋'}).views.config.length,1);
+  assert.equal(e.query({...q,views:['config'],termId:'2027春'}).ignoredFilters.termId,'2027春');
+  // ids: unique titles resolve, unknown ones are dropped and reported.
+  assert.deepEqual(e.query({...q,views:['catalog'],ids:['C++']}).views.catalog.map(x=>x.id),['cpp']);
+  const partial=e.query({...q,views:['catalog'],ids:['cpp','nope']});
+  assert.deepEqual(partial.views.catalog.map(x=>x.id),['cpp']);
+  assert.deepEqual(partial.ignoredFilters,{ids:['nope']});
+  assert.equal(e.query({...q,views:['catalog'],ids:['nope']}).views.catalog.length,3);
+});

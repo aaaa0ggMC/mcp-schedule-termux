@@ -21,5 +21,5 @@ if (previous.includes(marker)) {
     console.log(`备份：${backup}`);
   }
   writeFileSync(bashrc, previous + block, {mode});
-  console.log('start_kebiao 已安装。新终端直接使用；当前终端执行 source ~/kebiao/scripts/kebiao.bash。');
+  console.log(`start_kebiao 已安装。新终端直接使用；当前终端执行 . ${root}/scripts/kebiao.bash。`);
 }

@@ -29,11 +29,30 @@ test('tools/list describes every tool without $ref', async () => {
     const date = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' };
     const time = { type: 'string', pattern: '^(?:[01]\\d|2[0-3]):[0-5]\\d$' };
     // Reused leaf schemas arrive complete: the date twice, the id both as a field and as items.
-    assert.deepEqual(query.properties.from, date);
+    assert.deepEqual(query.properties.from, { ...date, description: 'Omit for today (in timezone)' });
     assert.deepEqual(query.properties.to, { ...date, description: 'Exclusive end date; default 7 days after from; max 120 days' });
-    assert.deepEqual(query.properties.ids, { type: 'array', items: { type: 'string', minLength: 1, maxLength: 160 } });
+    assert.deepEqual(query.properties.ids, { type: 'array', items: { type: 'string', minLength: 1, maxLength: 160 },
+      description: 'Display filter: exact IDs or unique exact titles. Omit or send [] for no restriction (an empty list never means match nothing; unmatched entries are ignored and reported)' });
     assert.deepEqual(query.properties.simulateEnable.items, { type: 'string', minLength: 1, maxLength: 160 });
     assert.deepEqual(query.properties.dayEnd, { ...time, default: '22:00' });
+
+    // Every filter a model may be tempted to "complete" says that omitting it means "no filter",
+    // and the two traps are spelled out: kinds is a record type, course filters drop other kinds.
+    for (const name of ['category', 'scheduleStatus', 'courseStatus', 'search', 'kinds', 'ids', 'state']) {
+      assert.ok(query.properties[name].description, `${name} needs a description`);
+    }
+    assert.match(query.properties.kinds.description, /not a category/);
+    assert.match(query.properties.ids.description, /never means match nothing/);
+    assert.match(query.properties.courseStatus.description, /unknown/);
+    assert.match(query.properties.termId.description, /do not invent a placeholder/);
+    const description = tools.find(tool => tool.name === 'schedule_query').description;
+    assert.match(description, /展示过滤器/);
+    assert.match(description, /coverage 始终统计全部有效数据/);
+
+    const guide = await client.readResource({ uri: 'schedule://guide' });
+    const guideJson = JSON.parse(guide.contents[0].text);
+    assert.match(guideJson.queryFilters, /可选展示过滤器/);
+    assert.match(guideJson.queryFilters, /不是分类/);
 
     // ... and the shared id keeps the description of the field it was written on, not of the
     // last place the same instance happened to be serialised.

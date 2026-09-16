@@ -1,6 +1,8 @@
-# 课表 MCP
+# 课表 MCP（mcp-schedule-termux）
 
 面向 LLM 的个人课表与弹性日程服务。Node.js 24+、SQLite 本地持久化，同一端口提供 Streamable HTTP 和传统 SSE，另支持 stdio。
+
+> `kebiao` 就是「课表」的拼音。它管的是课程表、学期校历、调停课和弹性任务，不是什么私有系统；仓库取名 `mcp-schedule-termux` 只是为了让用途一眼可辨。代码里的 `KEBIAO_*` 环境变量、`start_kebiao` 启动函数和 `data/kebiao.sqlite` 数据库都沿用这个简称。
 
 ## 启动
 
@@ -8,6 +10,8 @@
 npm ci
 npm start
 ```
+
+依赖全部是纯 JS（Node 内置 `node:sqlite`），没有原生编译步骤，所以在 Termux 上 `pkg install nodejs` 之后就能直接跑；在电脑上同样如此。克隆目录叫什么名字都可以，脚本按自身位置定位项目，不依赖路径。
 
 默认连接地址：
 
@@ -23,7 +27,7 @@ RikkaHub 添加 MCP 服务时，选择对应传输并填入上方 URL。两种�
 
 ```bash
 # 仅当前终端启用，无需修改 bashrc
-source ~/kebiao/scripts/kebiao.bash
+source scripts/kebiao.bash
 start_kebiao
 start_kebiao 3002
 
@@ -32,6 +36,8 @@ node scripts/install-shell.js
 ```
 
 前台运行，Ctrl-C 停止。安装后新终端可直接 `start_kebiao`。默认不设置自启动守护进程。
+
+在 Termux 上想让服务在息屏后继续跑，另开一个终端执行 `termux-wake-lock`；这是 Android 的后台限制，与项目本身无关。
 
 ### 配置
 
@@ -152,7 +158,8 @@ node src/server.js --stdio
 
 - courses 提供已纳入记录数、有实际课次的记录数、完整时间记录数、缺时间数、部分时间数和 issuesOutsideRange 数；这里“课程记录”也包括 category=activity 的周期活动。
 - issues 给出 ID、标题和原因，reason 是稳定枚举：time_not_imported、time_tbd、partial_schedule，模拟目标另加 term_disabled、outside_term。issues 使用独立 pagination，跟随 limit/offset。
-- **issues 只列可能落在本次范围内的缺口。** 学期覆盖本范围、但按预期时间（如暑假 window）不可能落在范围内的已知缺口放在 issuesOutsideRange，不计入 complete，只提示“别处还有不确定项”，避免同一口待定课把每次查询都标成不完整。
+- 每条 issue 还带上记录自己的解释，避免“学院还没排时间”被读成“用户没录/没选”：`status` 是选课状态（未设置则不输出）、`notes` 是该记录 notes 的原文、`acknowledgeNote` 是 acknowledge.note 的原文（未 acknowledge 或无 note 时不输出）；模拟类 issue（term_disabled/outside_term）同样带 status/notes，issuesOutsideRange 的条目结构与 issues 一致。
+- **issues 只列可能落在本次范围内的缺口。** 学期覆盖本范围、但按预期时间（如暑假 window）不可能落在范围内的已知缺口放在 issuesOutsideRange，不计入 complete；这时 message 会带上“另有 N 条时间不完整的记录按预期不会落在本范围内（见 issuesOutsideRange）”，避免同一口待定课把每次查询都标成不完整，也避免 complete=true 被读成“范围外也什么都没发生”。
 - `complete` 是本次范围的结论，不是全局结论：它只看 issues，不看 issuesOutsideRange，也不证明学校全量课表已导入。
 - issues[].acknowledged=true 表示该缺口已被 acknowledge 确认，仍需按 complete=false 对待冲突结论，但不必重复解释。
 - **complete=false 时，conflicts=[] 只能表示已知时间之间未发现冲突。** free 只扣除了已知占用；plan 会返回 tentative=true，提交的安排仍需等资料补齐后复核。
@@ -299,6 +306,8 @@ agenda 返回 `entityId`、`originalDate`、`ruleIndex`。调用 `schedule_mutat
 - `term.calendar` 将实际日期映射为教学日期，`null` 表示当天停课，例如 `{"2026-09-15":null,"2026-09-19":"2026-09-15"}`。
 - 单次例外覆盖实例时间/地点；移入查询范围的课也会出现，实例 ID 保留原日期。
 - 时间区间为 `[start,end)`，相邻事件不冲突。free/conflicts 始终计算全部有效占用，**不会被 search/state/kinds/ids 缩小**；agenda/catalog 等视图才应用这些筛选。
+- state/category/scheduleStatus/courseStatus/kinds/termId/search/ids 都是**可选展示过滤器**：省略、传 `[]` 或 `""` 都等于不筛（空值不会被当成"匹配不到任何东西"，空 `views` 按默认 `["agenda"]` 处理）。`kinds` 过滤的是记录类型（course/event/task/term/exception），不是分类；category/scheduleStatus/courseStatus 只对 course 有意义，并且会顺带排除 term/event/task —— 例如 `kinds:["course","event"]` 时 config 必然为空。只想问"今天有什么课/几点下课"时只传 from/to/views，别为填满 schema 而猜这些值。
+- termId 与 ids 按**引用**处理：接受精确 ID 或唯一精确标题（同 patch/simulateEnable）。填了匹配不到的引用（例如模型自造的占位符 `"."`、`"*"`）不会把结果清空，而是被忽略并在响应里报出来：`ignoredFilters` 给出被忽略的值，`coverage.message` 开头也会说明（这类占位符是最常见的"我发现字段是必需的于是随便填一个"行为）。ids 里部分能匹配时，只保留能匹配的那些。
 - 每个视图独立分页，检查 `pagination.*.hasMore`。默认最多 200 条，可到 2000 条；后续用 offset。coverage 的 issues 也独立分页。
 - `changes` 视图按 `revision` 升序返回审计日志增量：指定 `sinceRevision` 后只返回更新的记录，用最后一页的 revision 作为下一次的 sinceRevision 即可增量同步，无需全量重读。在写入响应里（returnQuery），changes 表示本次写入产生的差异，含每条的 before/after。
 - 写入整批事务、版本号、持久化 requestId 去重和审计。重试同一个 requestId 必须使用相同参数；`expectedRevision` 可防止覆盖旧版本。预览不持久化，不保留 requestId。

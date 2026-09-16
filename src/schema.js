@@ -72,17 +72,24 @@ export const exception = z.object({
 }).strict();
 export const entity = z.discriminatedUnion('kind', [term, course, event, task, exception]);
 export const querySchema = z.object({
-  from: date().optional(), to: date().optional().describe('Exclusive end date; default 7 days after from; max 120 days'),
+  from: date().optional().describe('Omit for today (in timezone)'), to: date().optional().describe('Exclusive end date; default 7 days after from; max 120 days'),
   timezone: z.string().default('Asia/Shanghai').refine(v => DateTime.now().setZone(v).isValid),
-  views: z.array(z.enum(['agenda','catalog','tasks','conflicts','free','config','summary','unscheduled','changes'])).default(['agenda']),
+  views: z.array(z.enum(['agenda','catalog','tasks','conflicts','free','config','summary','unscheduled','changes'])).default(['agenda'])
+    .describe('Which views to return; each one paginates on its own. Omit (or send []) for agenda'),
   sinceRevision: z.number().int().nonnegative().optional().describe('changes view: return persisted changes with a higher revision, oldest first; in a write response the changes view always reports that write instead'),
-  state: z.enum(['enabled','disabled','all']).default('enabled').describe('Disabled entries are excluded by default'),
-  category: z.enum(['academic','activity']).optional(),
-  scheduleStatus: z.enum(['scheduled','partial','tbd','unknown']).optional(),
-  courseStatus: z.enum(['candidate','selected','not_selected','dropped','unknown']).optional(),
-  termId: id().optional().describe('Filter courses/events and term config by term ID; summary groups courses by term and status'),
-  search: z.string().optional(), kinds: z.array(z.enum(['course','event','task','term','exception'])).optional(),
-  ids: z.array(id()).optional(), simulateEnable: z.array(id()).max(100).default([]).describe('Temporarily enable these exact IDs or unique titles without writing'),
+  state: z.enum(['enabled','disabled','all']).default('enabled').describe('Display filter: enabled (default) hides disabled entries, all shows both. Never changes what coverage counts'),
+  category: z.enum(['academic','activity']).optional()
+    .describe('Display filter, courses only. Omit for both. Empty or omitted means no filter, and it also drops every non-course entry (term/event/task), so config plus this filter is always empty'),
+  scheduleStatus: z.enum(['scheduled','partial','tbd','unknown']).optional()
+    .describe('Display filter, courses only. Omit to see every status together; scheduled hides the courses whose time is only partial/tbd/unknown'),
+  courseStatus: z.enum(['candidate','selected','not_selected','dropped','unknown']).optional()
+    .describe('Display filter, courses only. Omit for every status; imported courses without a status count as unknown, so selected hides them'),
+  termId: id().optional().describe('Filter courses/events and term config by term ID (an exact term ID or unique exact title). Omit it for every term - do not invent a placeholder such as ".", "*" or "any"; an unmatched value is ignored and reported instead of filtering'),
+  search: z.string().optional().describe('Display filter: case insensitive substring over title/notes/tags/teacher/location. Omit or send "" for no search'),
+  kinds: z.array(z.enum(['course','event','task','term','exception'])).optional()
+    .describe('Display filter over the storage kind of a record, not a category. Omit or send [] for all kinds. It applies to every view, so kinds ["course","event"] also empties config (which only holds terms)'),
+  ids: z.array(id()).optional().describe('Display filter: exact IDs or unique exact titles. Omit or send [] for no restriction (an empty list never means match nothing; unmatched entries are ignored and reported)'),
+  simulateEnable: z.array(id()).max(100).default([]).describe('Temporarily enable these exact IDs or unique titles without writing'),
   dayStart: time().default('08:00'), dayEnd: time().default('22:00'), minFreeMinutes: z.number().int().positive().default(30),
   bufferMinutes: z.number().int().min(0).max(180).default(0),
   limit: z.number().int().min(1).max(2000).default(200), offset: z.number().int().min(0).default(0),

@@ -93,11 +93,14 @@ test('soft expected windows place an out-of-term course and keep it out of unrel
   assert.equal(fall.coverage.courses.considered,1);assert.equal(fall.coverage.courses.unresolvedOutsideRange,1);
   assert.equal(fall.coverage.issuesOutsideRange[0].entityId,'intern');assert.equal(fall.coverage.issuesOutsideRange[0].reason,'time_tbd');
   assert.equal(fall.coverage.issuesOutsideRange[0].expectedTiming.window.label,'2027 暑假');
+  // complete=true 也不能把范围外的缺口说成"无事发生"，要指出来。
+  assert.match(fall.coverage.message,/issuesOutsideRange/);
   const summer=e.query({...q,from:'2027-07-01',to:'2027-07-08'});
   assert.equal(summer.coverage.complete,false);assert.equal(summer.coverage.courses.considered,1);
   assert.equal(summer.coverage.issues[0].entityId,'intern');assert.equal(summer.views.unscheduled.length,1);
   const before=e.query({...q,from:'2027-06-01',to:'2027-06-08'});
   assert.equal(before.coverage.complete,true);assert.equal(before.coverage.courses.considered,0);assert.equal(before.coverage.courses.unresolvedOutsideRange,0);
+  assert.equal(before.coverage.message.includes('issuesOutsideRange'),false);
 });
 
 test('soft windows validate, stay out of the term check and never mix with a fixed date',t=>{
@@ -115,16 +118,36 @@ test('soft windows validate, stay out of the term check and never mix with a fix
   assert.equal(e.query({views:['catalog'],ids:['math']}).views.catalog[0].scheduleStatus,'scheduled');
 });
 
+test('a gap carries the explanation of the entry itself instead of looking unfilled',t=>{
+  const notes='1周，学院计划中，具体时间与地点尚未安排（待通知）。预计安排在暑假（2026-2027学年暑期时段）。';
+  const intern={...course,id:'intern',title:'企业认知实习',status:'selected',rules:[],scheduleStatus:'tbd',notes};
+  const e=setup(t,[intern,{...course,id:'plain',title:'没写说明的课',status:'selected',notes:'',rules:[],scheduleStatus:'unknown'}]);
+  const all=e.query({...q,state:'all'});
+  const found=id=>all.coverage.issues.find(i=>i.entityId===id);
+  assert.equal(found('intern').notes,notes);assert.equal(found('intern').status,'selected');assert.equal(found('intern').reason,'time_tbd');
+  // No note, no invented one: an entry without notes stays without notes.
+  assert.equal(found('plain').notes,undefined);assert.equal(found('plain').status,'selected');
+  // The same explanation travels with the out-of-range variant, which shares the shape.
+  e.mutate({operations:[{op:'patch',target:'intern',changes:{expectedTiming:{window:{from:'2027-07-01',to:'2027-08-31',label:'2027 暑假'}}}}]});
+  const later=e.query({...q,state:'all'});
+  const outside=later.coverage.issuesOutsideRange.find(i=>i.entityId==='intern');
+  assert.equal(outside.notes,notes);assert.equal(outside.status,'selected');assert.equal(outside.expectedTiming.window.label,'2027 暑假');
+});
+
 test('acknowledged gaps are still reported but stop being re-explained until they expire',t=>{
   const today=DateTime.now().setZone('Asia/Shanghai').toISODate();
-  const e=setup(t,[{...course,id:'intern',title:'实习',rules:[],scheduleStatus:'tbd',expectedTiming:{window:{from:'2026-09-01',to:'2026-09-30'}},acknowledge:{until:DateTime.now().setZone('Asia/Shanghai').plus({days:30}).toISODate(),note:'已知，等学院通知'}}]);
+  const e=setup(t,[{...course,id:'intern',title:'实习',rules:[],scheduleStatus:'tbd',notes:'学院计划中，具体时间待通知',expectedTiming:{window:{from:'2026-09-01',to:'2026-09-30'}},acknowledge:{until:DateTime.now().setZone('Asia/Shanghai').plus({days:30}).toISODate(),note:'已知，等学院通知'}}]);
   const open=e.query(q);
   assert.equal(open.coverage.complete,false);assert.equal(open.coverage.acknowledgedIssues,1);
   assert.equal(open.coverage.issues[0].acknowledged,true);assert.match(open.coverage.message,/无需重复说明/);
+  assert.equal(open.coverage.issues[0].acknowledgeNote,'已知，等学院通知');
+  assert.equal(open.coverage.issues[0].notes,'学院计划中，具体时间待通知');
+  assert.equal(open.coverage.issues[0].status,'selected');
   e.mutate({operations:[{op:'patch',target:'intern',changes:{acknowledge:{until:DateTime.now().setZone('Asia/Shanghai').minus({days:1}).toISODate()}}}]});
   const expired=e.query(q);
   assert.equal(expired.coverage.acknowledgedIssues,0);assert.equal(expired.coverage.issues[0].acknowledged,false);
   assert.equal(expired.coverage.message.includes('无需重复说明'),false);
   assert.equal(expired.coverage.issues[0].acknowledgedUntil,DateTime.now().setZone('Asia/Shanghai').minus({days:1}).toISODate());
+  assert.equal(expired.coverage.issues[0].acknowledgeNote,undefined);
   assert.notEqual(today,'');
 });

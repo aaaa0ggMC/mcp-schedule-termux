@@ -68,6 +68,15 @@ export function mayHaveUnknownTime(c,t,start,end) {
 export function coverageOf(map,agenda,start,end,simulated=[],today=start.toISODate()) {
   const issues=[],issuesOutsideRange=[],activeCourses=[];
   const occurrenceIds=new Set(agenda.filter(o=>o.enabled&&o.kind==='course').map(o=>o.entityId));
+  // A gap never explains itself: "时间待定" of a course that is already selected and carries the
+  // reason in its notes (学院还没排时间 / 预计暑假) reads very differently from a course the user
+  // simply never filled in. Both lists of gaps therefore carry the entry's own explanation.
+  const gapOf=(c,status,extra={})=>({
+    entityId:c.id,title:c.title,category:c.category??'academic',scheduleStatus:status,reason:reasonOf(status),
+    ...(c.status!==undefined?{status:c.status}:{}),
+    ...(c.notes?{notes:c.notes}:{}),
+    ...extra
+  });
   for (const c of map.values()) {
     if (c.kind!=='course') continue;
     const t=map.get(c.termId), window=c.expectedTiming?.window;
@@ -78,19 +87,27 @@ export function coverageOf(map,agenda,start,end,simulated=[],today=start.toISODa
       activeCourses.push(c);
       if (gap && mayHaveUnknownTime(c,t,start,end)) {
         const ack=c.acknowledge;
-        issues.push({entityId:c.id,title:c.title,category:c.category??'academic',scheduleStatus:status,reason:reasonOf(status),
-          acknowledged:Boolean(ack&&ack.until>=today),...(ack?{acknowledgedUntil:ack.until}:{}),expectedTiming:c.expectedTiming});
-      } else if (gap) issuesOutsideRange.push({entityId:c.id,title:c.title,category:c.category??'academic',scheduleStatus:status,reason:reasonOf(status),expectedTiming:c.expectedTiming});
+        issues.push(gapOf(c,status,{
+          acknowledged:Boolean(ack&&ack.until>=today),
+          ...(ack?{acknowledgedUntil:ack.until, ...(ack.note?{acknowledgeNote:ack.note}:{})}:{}),
+          expectedTiming:c.expectedTiming
+        }));
+      } else if (gap) issuesOutsideRange.push(gapOf(c,status,{expectedTiming:c.expectedTiming}));
     }
-    if (simulated.includes(c.id) && !active) issues.push({entityId:c.id,title:c.title,reason:'term_disabled'});
-    if (simulated.includes(c.id) && active && !termInRange && !occurrenceIds.has(c.id)) issues.push({entityId:c.id,title:c.title,reason:'outside_term'});
+    if (simulated.includes(c.id) && !active) issues.push({...gapOf(c,status),reason:'term_disabled'});
+    if (simulated.includes(c.id) && active && !termInRange && !occurrenceIds.has(c.id)) issues.push({...gapOf(c,status),reason:'outside_term'});
   }
   const approximateEvents=agenda.filter(o=>o.enabled&&o.busy&&o.precision==='slot').length;
   const complete=issues.length===0, acknowledged=issues.filter(i=>i.acknowledged).length;
+  // A clean range with out-of-range gaps is not a silent "all good": say that the uncertainty
+  // exists somewhere else, so it is not mistaken for "nothing to know at all".
+  const elsewhere=issuesOutsideRange.length
+    ?`另有 ${issuesOutsideRange.length} 条时间不完整的记录按预期不会落在本范围内（见 issuesOutsideRange）；`
+    :'';
   return {
     scope:'enabled_entries_in_query_range',complete,
     courses:{considered:activeCourses.length,withOccurrences:occurrenceIds.size,fullySpecified:activeCourses.filter(c=>scheduleStatusOf(c)==='scheduled').length,missingTime:issues.filter(i=>['time_not_imported','time_tbd'].includes(i.reason)).length,partial:issues.filter(i=>i.reason==='partial_schedule').length,unresolvedOutsideRange:issuesOutsideRange.length},
     approximateEvents,acknowledgedIssues:acknowledged,issues,issuesOutsideRange,
-    message:!complete?(acknowledged===issues.length?'时间资料不完整：本范围内缺失的时间都是已确认的待定，无需重复说明；空冲突列表不代表已排除冲突，空闲和排程仅依据已知占用。':'时间资料不完整；空冲突列表不代表已排除冲突，空闲和排程仅依据已知占用。'):approximateEvents?'已检查本次范围内已存的有效安排；粗略事件按保守时段处理，不能确认精确冲突。':'已检查本次范围内已存的有效安排；不代表学校全部公示课程已导入。',
+    message:!complete?(acknowledged===issues.length?'时间资料不完整：本范围内缺失的时间都是已确认的待定，无需重复说明；空冲突列表不代表已排除冲突，空闲和排程仅依据已知占用。':'时间资料不完整；空冲突列表不代表已排除冲突，空闲和排程仅依据已知占用。'):approximateEvents?`已检查本次范围内已存的有效安排；${elsewhere}粗略事件按保守时段处理，不能确认精确冲突。`:`已检查本次范围内已存的有效安排；${elsewhere}不代表学校全部公示课程已导入。`,
   };
 }

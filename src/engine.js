@@ -167,9 +167,45 @@ export function queryMap(original,raw={},context={}) {
   const simulated=[];
   for(const ref of q.simulateEnable) {const e=resolve(map,ref);e.enabled=true;if(e.kind==='course' && academic(e))e.status='selected';simulated.push(e.id);}
   for (const [id,e] of map) if(e.kind==='course')map.set(id,courseInfo(e));
+  // Reference filters (termId, ids) accept an exact ID or a unique exact title, like every other
+  // reference in this API. A value that matches nothing is far more often a made-up placeholder
+  // ("." or "*" meaning "any") than a request for an empty answer, so it is dropped and reported
+  // instead of blanking every view - and, inside a write's returnQuery, instead of rolling the
+  // write back for a bad filter.
+  // A serialised tool call says "I am not narrowing by this" with an empty list or an empty
+  // string: ids:[], kinds:[], search:"". Treating those as a filter matches nothing and silently
+  // blanks every view, so an empty value means "no filter" here, exactly like omitting it.
+  const given=v=>Array.isArray(v)?v.length>0:typeof v==='string'?v.trim()!=='':v!==undefined&&v!==null;
+  const ignoredFilters={};
+  const lookup=ref=>{
+    if(map.has(ref)) return ref;
+    const hits=values(map).filter(e=>e.title===ref);
+    return hits.length===1?hits[0].id:null;
+  };
+  if(given(q.termId)){
+    const ref=q.termId, id=lookup(ref);
+    if(id && map.get(id).kind==='term') q.termId=id; else {q.termId=undefined;ignoredFilters.termId=ref;}
+  }
+  if(given(q.ids)){
+    const resolved=q.ids.map(lookup), missing=q.ids.filter((ref,i)=>!resolved[i]), kept=resolved.filter(Boolean);
+    if(missing.length) ignoredFilters.ids=missing;
+    q.ids=kept.length?kept:undefined;
+  }
   const effective=e=>e.enabled && (e.kind==='course' ? related(map,e.termId,'term').enabled && courseActive(e) : e.kind==='event' && e.taskId ? related(map,e.taskId,'task').enabled : true);
-  const matches=e=>(q.state==='all'||(q.state==='enabled')===effective(e)) && (!q.category || (e.kind==='course' && e.category===q.category)) && (!q.scheduleStatus || (e.kind==='course' && e.scheduleStatus===q.scheduleStatus)) && (!q.courseStatus || (e.kind==='course' && (e.status??'unknown')===q.courseStatus)) && (!q.termId || (e.kind==='term'?e.id:e.termId)===q.termId) && (!q.search || `${e.title} ${e.notes??''} ${(e.tags??[]).join(' ')} ${e.teacher??''} ${e.location??''}`.toLowerCase().includes(q.search.toLowerCase())) && (!q.kinds || q.kinds.includes(e.kind)) && (!q.ids || q.ids.includes(e.entityId??e.id));
-  const response={range:{from:start.toISODate(),to:end.toISODate(),timezone:q.timezone},simulated,views:{},pagination:{}};
+  if(!q.views.length)q.views=['agenda'];
+  const matches=e=>{
+    const hay=`${e.title} ${e.notes??''} ${(e.tags??[]).join(' ')} ${e.teacher??''} ${e.location??''}`.toLowerCase();
+    return (q.state==='all'||(q.state==='enabled')===effective(e))
+      && (!given(q.category) || (e.kind==='course' && e.category===q.category))
+      && (!given(q.scheduleStatus) || (e.kind==='course' && e.scheduleStatus===q.scheduleStatus))
+      && (!given(q.courseStatus) || (e.kind==='course' && (e.status??'unknown')===q.courseStatus))
+      && (!given(q.termId) || (e.kind==='term'?e.id:e.termId)===q.termId)
+      && (!given(q.search) || hay.includes(q.search.toLowerCase()))
+      && (!given(q.kinds) || q.kinds.includes(e.kind))
+      && (!given(q.ids) || q.ids.includes(e.entityId??e.id));
+  };
+  const response={range:{from:start.toISODate(),to:end.toISODate(),timezone:q.timezone},simulated,views:{},pagination:{},
+    ...(Object.keys(ignoredFilters).length?{ignoredFilters}:{})};
   const put=(name,items)=>{response.views[name]=items.slice(q.offset,q.offset+q.limit);response.pagination[name]={total:items.length,offset:q.offset,limit:q.limit,hasMore:q.offset+q.limit<items.length};};
   const all=values(map).sort((a,b)=>a.id.localeCompare(b.id));
   if(q.views.includes('catalog'))put('catalog',all.filter(matches));
@@ -201,6 +237,7 @@ export function queryMap(original,raw={},context={}) {
     const coverage=coverageOf(map,agenda,start,end,simulated,today);
     const issues=coverage.issues;
     response.coverage={...coverage,issues:issues.slice(q.offset,q.offset+q.limit),issuesOutsideRange:coverage.issuesOutsideRange.slice(q.offset,q.offset+q.limit),pagination:{total:issues.length,offset:q.offset,limit:q.limit,hasMore:q.offset+q.limit<issues.length}};
+    if(Object.keys(ignoredFilters).length) response.coverage.message=noteIgnoredFilters(ignoredFilters,map)+response.coverage.message;
     if(simulated.length) {
       const baseline=conflicts(timeline(original,q)), after=conflicts(agenda);
       const key=c=>JSON.stringify([...[c.a,c.b].sort(),c.start,c.end]);
@@ -216,6 +253,13 @@ export function queryMap(original,raw={},context={}) {
     if(q.views.includes('free'))put('free',freeSlots(agenda,q));
   }
   return response;
+}
+// Filters that could not match anything are reported in plain language too, because the message
+// is what a reader (human or model) usually quotes back.
+function noteIgnoredFilters(ignored,map) {
+  const shown=Object.entries(ignored).map(([name,value])=>`${name}=${JSON.stringify(value)}`).join('、');
+  const terms=values(map).filter(e=>e.kind==='term').map(t=>t.id);
+  return `忽略无法匹配的展示过滤器 ${shown}（可用学期：${terms.join('、')||'无'}）；要查询全部数据请省略该参数。`;
 }
 function putEntity(map,raw) {
   const e=entity.parse(raw); e.id??=`${e.kind}_${randomUUID()}`;
