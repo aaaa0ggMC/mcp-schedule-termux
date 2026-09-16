@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
 import { randomUUID } from 'node:crypto';
+import Fuse from 'fuse.js';
 import { entity, querySchema, mutateSchema, importSchema, planSchema } from './schema.js';
 import { fail } from './store.js';
 import { timetableAt, validateTimetables, resolvePeriods } from './timetable.js';
@@ -193,14 +194,46 @@ export function queryMap(original,raw={},context={}) {
   }
   const effective=e=>e.enabled && (e.kind==='course' ? related(map,e.termId,'term').enabled && courseActive(e) : e.kind==='event' && e.taskId ? related(map,e.taskId,'task').enabled : true);
   if(!q.views.length)q.views=['agenda'];
+  let matchedIds = null;
+  if (given(q.search)) {
+    const list = values(map).map(e => ({
+      ...e,
+      _searchAliases: (e.aliases??[]).join(' '),
+      _searchTags: (e.tags??[]).join(' ')
+    }));
+    const fuse = new Fuse(list, {
+      keys: [
+        {name: 'title', weight: 2},
+        {name: 'courseCode', weight: 1.5},
+        {name: 'teachingClass', weight: 1},
+        {name: '_searchAliases', weight: 2},
+        {name: 'teacher', weight: 1},
+        {name: 'location', weight: 1},
+        {name: 'notes', weight: 0.5},
+        {name: '_searchTags', weight: 1}
+      ],
+      threshold: 0.4,
+      ignoreLocation: true
+    });
+    matchedIds = new Set(fuse.search(q.search).map(res => res.item.id));
+  }
+
   const matches=e=>{
-    const hay=`${e.title} ${e.notes??''} ${(e.tags??[]).join(' ')} ${e.teacher??''} ${e.location??''}`.toLowerCase();
-    return (q.state==='all'||(q.state==='enabled')===effective(e))
+    let searchMatch = true;
+    if (given(q.search)) {
+      const isEntityMatch = matchedIds.has(e.entityId ?? e.id);
+      if (!isEntityMatch) {
+        if (!e.entityId) searchMatch = false;
+        else if (!e.location?.toLowerCase().includes(q.search.toLowerCase())) searchMatch = false;
+      }
+    }
+
+    return searchMatch
+      && (q.state==='all'||(q.state==='enabled')===effective(e))
       && (!given(q.category) || (e.kind==='course' && e.category===q.category))
       && (!given(q.scheduleStatus) || (e.kind==='course' && e.scheduleStatus===q.scheduleStatus))
-      && (!given(q.courseStatus) || (e.kind==='course' && (e.status??'unknown')===q.courseStatus))
+      && (q.courseStatus==='all' || !given(q.courseStatus) || (e.kind==='course' && (e.status??'unknown')===q.courseStatus))
       && (!given(q.termId) || (e.kind==='term'?e.id:e.termId)===q.termId)
-      && (!given(q.search) || hay.includes(q.search.toLowerCase()))
       && (!given(q.kinds) || q.kinds.includes(e.kind))
       && (!given(q.ids) || q.ids.includes(e.entityId??e.id));
   };
@@ -208,7 +241,19 @@ export function queryMap(original,raw={},context={}) {
     ...(Object.keys(ignoredFilters).length?{ignoredFilters}:{})};
   const put=(name,items)=>{response.views[name]=items.slice(q.offset,q.offset+q.limit);response.pagination[name]={total:items.length,offset:q.offset,limit:q.limit,hasMore:q.offset+q.limit<items.length};};
   const all=values(map).sort((a,b)=>a.id.localeCompare(b.id));
-  if(q.views.includes('catalog'))put('catalog',all.filter(matches));
+  if(q.views.includes('catalog')){
+    let todayAgenda = null;
+    put('catalog', all.filter(matches).map(e => {
+      if (!['course', 'event', 'task'].includes(e.kind)) return e;
+      if (!todayAgenda) {
+        const qToday = { ...q, from: today, to: DateTime.fromISO(today, {zone:q.timezone}).plus({days:1}).toISODate() };
+        todayAgenda = timeline(map, qToday);
+      }
+      const occ = todayAgenda.filter(o => o.entityId === e.id && o.enabled);
+      if (occ.length) return { ...e, todaySchedule: occ.map(o => ({ start: o.start, end: o.end, location: o.location })) };
+      return e;
+    }));
+  }
   if(q.views.includes('unscheduled'))put('unscheduled',all.filter(e=>e.kind==='course' && e.scheduleStatus!=='scheduled' && matches(e) && mayHaveUnknownTime(e,related(map,e.termId,'term'),start,end)));
   if(q.views.includes('summary')) {
     const groups=new Map();

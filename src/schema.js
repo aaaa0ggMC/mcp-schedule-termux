@@ -12,6 +12,7 @@ const period = () => z.object({ number: z.number().int().positive(), start: time
 const timetableName = () => z.string().min(1).max(80).describe('Exact timetable name, e.g. summer or winter');
 const common = () => ({
   id: id().optional(), title: z.string().min(1).max(300), enabled: z.boolean().default(true),
+  aliases: z.array(z.string()).max(30).default([]).describe('Alternative names for searching, e.g. ["C加加", "cpp"]'),
   tags: z.array(z.string()).max(30).default([]), notes: z.string().max(10000).default(''),
   metadata: z.record(z.string(), z.unknown()).default({}),
   source: z.object({ namespace: id(), key: id() }).strict().optional(),
@@ -32,6 +33,8 @@ export const term = z.object({
 }).strict();
 export const course = z.object({
   ...common(), kind: z.literal('course'), termId: id(), teacher: z.string().default(''), location: z.string().default(''),
+  courseCode: z.string().optional().describe('Course code or group name to link multiple teaching classes of the same course'),
+  teachingClass: z.string().optional().describe('Identifier for the specific teaching class, e.g. "教学班1"'),
   category: z.enum(['academic','activity']).optional().describe('academic by default; activity is a personal recurring meeting, excluded from academic summary'),
   scheduleStatus: z.enum(['scheduled','partial','tbd','unknown']).optional().describe('Omitted: rules present => scheduled, empty => unknown. tbd only if source confirms undecided time; partial means some sessions are missing'),
   scheduleSource: z.object({ type: z.enum(['official','personal','unknown']), reference: z.string().max(2000).optional() }).strict().optional(),
@@ -82,8 +85,8 @@ export const querySchema = z.object({
     .describe('Display filter, courses only. Omit for both. Empty or omitted means no filter, and it also drops every non-course entry (term/event/task), so config plus this filter is always empty'),
   scheduleStatus: z.enum(['scheduled','partial','tbd','unknown']).optional()
     .describe('Display filter, courses only. Omit to see every status together; scheduled hides the courses whose time is only partial/tbd/unknown'),
-  courseStatus: z.enum(['candidate','selected','not_selected','dropped','unknown']).optional()
-    .describe('Display filter, courses only. Omit for every status; imported courses without a status count as unknown, so selected hides them'),
+  courseStatus: z.enum(['candidate','selected','not_selected','dropped','unknown','all']).default('all')
+    .describe('Display filter, courses only. all (default) shows every status; imported courses without a status count as unknown.'),
   termId: id().optional().describe('Filter courses/events and term config by term ID (an exact term ID or unique exact title). Omit it for every term - do not invent a placeholder such as ".", "*" or "any"; an unmatched value is ignored and reported instead of filtering'),
   search: z.string().optional().describe('Display filter: case insensitive substring over title/notes/tags/teacher/location. Omit or send "" for no search'),
   kinds: z.array(z.enum(['course','event','task','term','exception'])).optional()
