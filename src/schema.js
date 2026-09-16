@@ -84,9 +84,9 @@ export const querySchema = z.object({
   category: z.enum(['academic','activity']).optional()
     .describe('Display filter, courses only. Omit for both. Empty or omitted means no filter, and it also drops every non-course entry (term/event/task), so config plus this filter is always empty'),
   scheduleStatus: z.enum(['scheduled','partial','tbd','unknown']).optional()
-    .describe('Display filter, courses only. Omit to see every status together; scheduled hides the courses whose time is only partial/tbd/unknown'),
+    .describe('Display filter, courses only. Omit to see every status together; scheduled hides the courses whose time is only partial/tbd/unknown. CRITICAL: NEVER enumerate statuses in parallel queries. Omit the parameter instead.'),
   courseStatus: z.enum(['candidate','selected','not_selected','dropped','unknown','all']).default('all')
-    .describe('Display filter, courses only. all (default) shows every status; imported courses without a status count as unknown.'),
+    .describe('Display filter, courses only. "all" (default) shows every status. CRITICAL: NEVER make multiple parallel queries to guess a course status. ALWAYS use "all" (or omit this parameter) if you are unsure of the status.'),
   termId: id().optional().describe('Filter courses/events and term config by term ID (an exact term ID or unique exact title). Omit it for every term - do not invent a placeholder such as ".", "*" or "any"; an unmatched value is ignored and reported instead of filtering'),
   search: z.string().optional().describe('Display filter: case insensitive substring over title/notes/tags/teacher/location. Omit or send "" for no search'),
   kinds: z.array(z.enum(['course','event','task','term','exception'])).optional()
