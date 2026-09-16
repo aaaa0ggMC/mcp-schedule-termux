@@ -48,7 +48,7 @@ node src/server.js --stdio
 
 | 工具 | 一次调用能做什么 |
 |---|---|
-| `schedule_query` | 同时获取 agenda、catalog、tasks、conflicts、free、config、summary、unscheduled；筛选、分页、假设启用 |
+| `schedule_query` | 同时获取 agenda、catalog、tasks、conflicts、free、config、summary、unscheduled、changes；筛选、分页、假设启用 |
 | `schedule_mutate` | 原子执行多次 put/patch/enable/set_timetable/switch_timetable，直接返回修改后的视图 |
 | `schedule_import` | 按官方稳定来源键去重导入，保留个人启用状态，返回导入结果及视图 |
 | `schedule_plan` | 新建任务并安排，支持仅预览或直接提交，返回时间块和剩余未安排原因 |
@@ -102,20 +102,20 @@ node src/server.js --stdio
 - key 使用官方稳定编号，不使用容易重复的课程名称。
 - 新导入课程默认禁用；明确 `enabled=true` 表示已选。学期默认启用。
 - 重复导入保留个人 enabled，`preserveEnabled=false` 可覆盖。
-- 导入更新为完整替换；个人备注等字段需要在重新导入时携带，enabled 和已有 status 默认保留。
+- 导入更新为完整替换：除自动保留的 enabled 和已有 status 外，notes/tags/metadata 等字段都以本次导入内容为准，需要保留的必须在导入条目中携带。
 - 未出现在本次导入的旧记录保留，可在之后批量 disable。
 - 学期和课程可同批写入，通过自定义固定 ID 引用；重新导入已有来源会沿用旧 ID，调用方应继续沿用返回的 ID。
 - 导入接收结构化 JSON。网页、教务登录、PDF、图片解析由客户端先处理。
 
 ### 用原始 Markdown 补齐已有课表
 
-先查询 `catalog/config/tasks`，使用 state=all 并遍历分页，核对现有 ID、source 和个人选择。缺课程时间时，优先 patch 对应课程的 rules、scheduleStatus、expectedTiming、scheduleSource；原文未写的信息不猜测。新增课堂才用稳定来源键导入，各课堂独立记录。已有例会可 patch category=activity（原记录若带选课状态或学分字段，完整 put 时移除这些不适用字段）。
+先查询 `catalog/config/tasks`，使用 state=all 并遍历分页，核对现有 ID、source 和个人选择。缺课程时间时，优先 patch 对应课程的 rules、scheduleStatus、expectedTiming、scheduleSource；原文未写的信息不猜测，明确说是“预计/往年安排在假期”的用 expectedTiming.window 并标 source/confidence，不要写成确定日期。新增课堂才用稳定来源键导入，各课堂独立记录。已有例会可 patch category=activity（原记录若带选课状态或学分字段，完整 put 时移除这些不适用字段）。
 
 整份重新 import 是**完整替换**，自动保留的只有已有 enabled/status（可分别关闭）；任务 completed、作息表、调休日历、备注等需要在导入内容中显式保留。不要拿较旧的 Markdown 恢复后来已经完成的登记任务，或抹去后来设置的冬夏切换和调休。先 dryRun，确认数据和 coverage 后再使用期望版本提交；已获授权时不必额外询问确认。
 
 可交给录入 AI 的指令：
 
-> 先读取全部现有课表，再根据这份 Markdown 补齐所有课堂的公示时间，包括未选、候选课程。原有课程用原 ID 做 patch；新增课堂用独立稳定 source.key 去重导入。未选状态与时间规则独立保存，默认保留现有选课、启禁用状态。材料未写的时间标 unknown，明确待通知标 tbd，缺部分课次标 partial；已知开课周用 expectedTiming，勿编造节次。个人周期例会标 category=activity。保留已完成任务、现有作息表和调休，不用旧材料覆盖这些后续变更。最后返回 unscheduled、coverage，并模拟 C++ 的新增冲突；缺时间时明确说明无法完整判断。
+> 先读取全部现有课表，再根据这份 Markdown 补齐所有课堂的公示时间，包括未选、候选课程。原有课程用原 ID 做 patch；新增课堂用独立稳定 source.key 去重导入。未选状态与时间规则独立保存，默认保留现有选课、启禁用状态。材料未写的时间标 unknown，明确待通知标 tbd，缺部分课次标 partial；已知开课周用 expectedTiming，只有“预计安排在假期”这类说法的用 expectedTiming.window 并标 source/confidence，勿编造节次。个人周期例会标 category=activity。保留已完成任务、现有作息表和调休，不用旧材料覆盖这些后续变更。最后返回 unscheduled、coverage，并模拟 C++ 的新增冲突；缺时间时明确说明无法完整判断，不要重复解释已 acknowledge 的缺口。
 
 ### 未选课程、公示时间和分析覆盖情况
 
@@ -142,12 +142,19 @@ node src/server.js --stdio
 
 可以用 `expectedTiming:{startWeek:9}` 表示“第9周起，具体时间未录入”，不虚构结束周、星期和节次。还支持 endWeek、实际 date、durationWeeks；date 与教学周范围互斥。durationWeeks 仅表示持续周数，不会被展开成占用，也不能单凭“持续1周”推断是哪一周。对 partial，这些边界描述尚缺的部分；已知 rules 仍照常参与计算。
 
-`unscheduled` 独立分页，列出查询日期范围内可能涉及的未知/待定/部分录入课程；state=all 含未选，catalog 可不限日期查所有记录。已知教学周边界会考虑 term.calendar 调休；没有明确日期边界时保守认为可能影响整个学期。
+预期还可以是**学期之外**的：`expectedTiming.window` 用 `{from,to,label}`（含首尾的当地日期）记录“预计安排在 2027 暑假”这类尚未确定的落点，它是软性预期，不会生成任何占用，也不能替代 rules。window 与 date/startWeek/endWeek/durationWeeks 互斥，长度上限 420 天。同一处可标注 `source`（official/personal/unknown）、`confidence`（high/medium/low）和 `verifiedAt`，说明这条预期来自谁、有多可信、何时核对过；personal 或 low 只能作为预期，不能当成官方排课。
+
+已经知道缺口但暂时不想被反复提醒时，用 `acknowledge:{until,note}` 记下确认日期。在 until 之前 coverage 仍会报告该缺口并标记 acknowledged（确认到期后自动恢复普通缺口），`acknowledgedIssues` 给出这类条目的数量；解释原因只需做一次。
+
+`unscheduled` 独立分页，列出查询日期范围内可能涉及的未知/待定/部分录入课程；state=all 含未选，catalog 可不限日期查所有记录。已知教学周边界会考虑 term.calendar 调休；没有明确边界时保守认为可能影响整个学期，写了 window 的则按该预期窗口判断。
 
 查询 agenda/conflicts/free/unscheduled 或进行模拟时，附带 `coverage`：
 
-- courses 提供已纳入记录数、有实际课次的记录数、完整时间记录数、缺时间数和部分时间数；这里“课程记录”也包括 category=activity 的周期活动。
-- issues 给出 ID、标题和原因，如 time_not_imported、time_tbd、partial_schedule。issues 使用独立 pagination，跟随 limit/offset。
+- courses 提供已纳入记录数、有实际课次的记录数、完整时间记录数、缺时间数、部分时间数和 issuesOutsideRange 数；这里“课程记录”也包括 category=activity 的周期活动。
+- issues 给出 ID、标题和原因，reason 是稳定枚举：time_not_imported、time_tbd、partial_schedule，模拟目标另加 term_disabled、outside_term。issues 使用独立 pagination，跟随 limit/offset。
+- **issues 只列可能落在本次范围内的缺口。** 学期覆盖本范围、但按预期时间（如暑假 window）不可能落在范围内的已知缺口放在 issuesOutsideRange，不计入 complete，只提示“别处还有不确定项”，避免同一口待定课把每次查询都标成不完整。
+- `complete` 是本次范围的结论，不是全局结论：它只看 issues，不看 issuesOutsideRange，也不证明学校全量课表已导入。
+- issues[].acknowledged=true 表示该缺口已被 acknowledge 确认，仍需按 complete=false 对待冲突结论，但不必重复解释。
 - **complete=false 时，conflicts=[] 只能表示已知时间之间未发现冲突。** free 只扣除了已知占用；plan 会返回 tentative=true，提交的安排仍需等资料补齐后复核。
 - complete 仅针对本次范围内已存的有效数据，不证明学校全量课表已导入；粗略事件另由 approximateEvents 和冲突 certainty 披露精度。
 - coverage 与 free/conflicts 一样，始终检查全部有效占用，不受 search/state/kinds/ids/termId/category/scheduleStatus 等展示筛选或分页缩小。
@@ -292,7 +299,8 @@ agenda 返回 `entityId`、`originalDate`、`ruleIndex`。调用 `schedule_mutat
 - `term.calendar` 将实际日期映射为教学日期，`null` 表示当天停课，例如 `{"2026-09-15":null,"2026-09-19":"2026-09-15"}`。
 - 单次例外覆盖实例时间/地点；移入查询范围的课也会出现，实例 ID 保留原日期。
 - 时间区间为 `[start,end)`，相邻事件不冲突。free/conflicts 始终计算全部有效占用，**不会被 search/state/kinds/ids 缩小**；agenda/catalog 等视图才应用这些筛选。
-- 每个视图独立分页，检查 `pagination.*.hasMore`。默认最多 200 条，可到 2000 条；后续用 offset。
+- 每个视图独立分页，检查 `pagination.*.hasMore`。默认最多 200 条，可到 2000 条；后续用 offset。coverage 的 issues 也独立分页。
+- `changes` 视图按 `revision` 升序返回审计日志增量：指定 `sinceRevision` 后只返回更新的记录，用最后一页的 revision 作为下一次的 sinceRevision 即可增量同步，无需全量重读。在写入响应里（returnQuery），changes 表示本次写入产生的差异，含每条的 before/after。
 - 写入整批事务、版本号、持久化 requestId 去重和审计。重试同一个 requestId 必须使用相同参数；`expectedRevision` 可防止覆盖旧版本。预览不持久化，不保留 requestId。
 - returnQuery 是同一事务内的视图，其版本号使用外层 `revision`；dryRun 外层版本不递增。
 - 冲突不会阻止手工录入（课表可能真实冲突），按需在同次写入指定 returnQuery.views 包含 conflicts。

@@ -139,3 +139,33 @@ test('imports preserve enrollment independently with explicit opt out',t=>{
   e.import({namespace:'school',entries:[{...entry,status:'selected'}],preserveStatus:false});
   assert.equal(e.store.snapshot().get('cpp').status,'selected');assert.equal(e.store.snapshot().get('cpp').enabled,false);
 });
+
+test('changes view replays the audit log incrementally and reports the write that produced it',t=>{
+  const e=setup(t),base=e.store.revision();
+  e.mutate({operations:[{op:'put',entity:course}]});
+  const first=e.query({views:['changes'],sinceRevision:base});
+  assert.equal(first.views.changes.length,1);assert.equal(first.views.changes[0].kind,'mutate');
+  assert.equal(first.views.changes[0].changes[0].id,'cpp');assert.equal(first.views.changes[0].changes[0].before,null);
+  assert.equal(first.views.changes[0].changes[0].after.rules.length,1);
+  assert.equal(first.pagination.changes.hasMore,false);
+  const seen=first.views.changes.at(-1).revision;
+  e.mutate({operations:[{op:'enable',targets:['cpp'],enabled:false}]});
+  const delta=e.query({views:['changes'],sinceRevision:seen});
+  assert.equal(delta.views.changes.length,1);assert.equal(delta.views.changes[0].changes[0].before.enabled,true);
+  assert.equal(delta.views.changes[0].changes[0].after.enabled,false);
+  assert.equal(e.query({views:['changes'],sinceRevision:e.store.revision()}).views.changes.length,0);
+  const write=e.mutate({operations:[{op:'put',entity:{...course,id:'cpp2'}}],returnQuery:{views:['changes']}});
+  assert.equal(write.query.views.changes.length,1);assert.equal(write.query.views.changes[0].changes[0].id,'cpp2');
+  assert.equal(write.query.views.changes[0].revision,write.revision);
+  const preview=e.mutate({operations:[{op:'put',entity:{...course,id:'cpp3'}}],dryRun:true,returnQuery:{views:['changes']}});
+  assert.equal(preview.query.views.changes[0].changes[0].id,'cpp3');assert.equal(e.store.snapshot().has('cpp3'),false);
+  assert.deepEqual(e.query({views:['changes'],sinceRevision:base}).views.changes.map(c=>c.revision),[base+1,base+2,base+3]);
+});
+
+test('reimport replaces the whole entry and only carries over selection state',t=>{
+  const e=setup(t),source={namespace:'school',key:'cpp'};
+  e.import({namespace:'school',entries:[{...course,notes:'个人备注',tags:['必修'],enabled:true,source}]});
+  e.import({namespace:'school',entries:[{...course,notes:'',tags:[],source}]});
+  const saved=e.store.snapshot().get('cpp');
+  assert.equal(saved.notes,'');assert.deepEqual(saved.tags,[]);assert.equal(saved.enabled,true);
+});

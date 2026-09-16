@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { DateTime } from 'luxon';
 import { Store } from '../src/store.js';
 import { Engine } from '../src/engine.js';
 const term={kind:'term',id:'term',title:'秋季',startDate:'2026-09-01',endDate:'2026-12-31',weekOne:'2026-08-31'};
@@ -81,4 +82,49 @@ test('import retains selection while accepting official timing details and activ
   e.import({namespace:'school',entries:[{...course,status:'selected',rules,scheduleStatus:'scheduled',scheduleSource:{type:'official'},source}]});
   const saved=e.store.snapshot().get('math');assert.equal(saved.status,'not_selected');assert.equal(saved.enabled,false);assert.equal(saved.scheduleStatus,'scheduled');
   assert.equal(e.query({...q,state:'all',courseStatus:'not_selected'}).views.agenda.length,1);
+});
+
+test('soft expected windows place an out-of-term course and keep it out of unrelated ranges',t=>{
+  const intern={...course,id:'intern',title:'企业认知实习',status:'selected',rules:[],scheduleStatus:'tbd',
+    expectedTiming:{window:{from:'2027-07-01',to:'2027-08-31',label:'2027 暑假'},source:'personal',confidence:'low',verifiedAt:'2026-09-16'}};
+  const e=setup(t,[intern,{...course,id:'draft',title:'未导入且禁用',rules:[],status:'not_selected',enabled:false}]);
+  const fall=e.query(q);
+  assert.equal(fall.coverage.complete,true);assert.equal(fall.views.unscheduled.length,0);
+  assert.equal(fall.coverage.courses.considered,1);assert.equal(fall.coverage.courses.unresolvedOutsideRange,1);
+  assert.equal(fall.coverage.issuesOutsideRange[0].entityId,'intern');assert.equal(fall.coverage.issuesOutsideRange[0].reason,'time_tbd');
+  assert.equal(fall.coverage.issuesOutsideRange[0].expectedTiming.window.label,'2027 暑假');
+  const summer=e.query({...q,from:'2027-07-01',to:'2027-07-08'});
+  assert.equal(summer.coverage.complete,false);assert.equal(summer.coverage.courses.considered,1);
+  assert.equal(summer.coverage.issues[0].entityId,'intern');assert.equal(summer.views.unscheduled.length,1);
+  const before=e.query({...q,from:'2027-06-01',to:'2027-06-08'});
+  assert.equal(before.coverage.complete,true);assert.equal(before.coverage.courses.considered,0);assert.equal(before.coverage.courses.unresolvedOutsideRange,0);
+});
+
+test('soft windows validate, stay out of the term check and never mix with a fixed date',t=>{
+  const e=setup(t,[course]),before=e.store.revision();
+  for(const changes of [{expectedTiming:{window:{from:'2027-08-31',to:'2027-07-01'}}},
+                        {expectedTiming:{window:{from:'2026-09-01',to:'2026-09-02'},date:'2026-09-01'}},
+                        {expectedTiming:{window:{from:'2026-09-01',to:'2026-09-02'},startWeek:3}},
+                        {expectedTiming:{window:{from:'2026-09-01',to:'2026-09-02'},durationWeeks:2}},
+                        {expectedTiming:{window:{from:'2026-01-01',to:'2030-01-01'}}}])
+    assert.throws(()=>e.mutate({operations:[{op:'put',entity:{...course,id:'x',rules:[],scheduleStatus:'tbd',...changes.expectedTiming?{expectedTiming:changes.expectedTiming}:{}}}]}));
+  assert.equal(e.store.revision(),before);
+  e.mutate({operations:[{op:'patch',target:'math',changes:{expectedTiming:{window:{from:'2027-07-01',to:'2027-08-31',label:'暑假'},source:'personal',confidence:'low',verifiedAt:'2026-09-16'}}}]});
+  const saved=e.store.snapshot().get('math');
+  assert.equal(saved.expectedTiming.window.to,'2027-08-31');assert.equal(saved.expectedTiming.source,'personal');
+  assert.equal(e.query({views:['catalog'],ids:['math']}).views.catalog[0].scheduleStatus,'scheduled');
+});
+
+test('acknowledged gaps are still reported but stop being re-explained until they expire',t=>{
+  const today=DateTime.now().setZone('Asia/Shanghai').toISODate();
+  const e=setup(t,[{...course,id:'intern',title:'实习',rules:[],scheduleStatus:'tbd',expectedTiming:{window:{from:'2026-09-01',to:'2026-09-30'}},acknowledge:{until:DateTime.now().setZone('Asia/Shanghai').plus({days:30}).toISODate(),note:'已知，等学院通知'}}]);
+  const open=e.query(q);
+  assert.equal(open.coverage.complete,false);assert.equal(open.coverage.acknowledgedIssues,1);
+  assert.equal(open.coverage.issues[0].acknowledged,true);assert.match(open.coverage.message,/无需重复说明/);
+  e.mutate({operations:[{op:'patch',target:'intern',changes:{acknowledge:{until:DateTime.now().setZone('Asia/Shanghai').minus({days:1}).toISODate()}}}]});
+  const expired=e.query(q);
+  assert.equal(expired.coverage.acknowledgedIssues,0);assert.equal(expired.coverage.issues[0].acknowledged,false);
+  assert.equal(expired.coverage.message.includes('无需重复说明'),false);
+  assert.equal(expired.coverage.issues[0].acknowledgedUntil,DateTime.now().setZone('Asia/Shanghai').minus({days:1}).toISODate());
+  assert.notEqual(today,'');
 });

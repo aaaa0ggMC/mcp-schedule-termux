@@ -161,8 +161,9 @@ function conflicts(agenda) {
   }
   return result;
 }
-export function queryMap(original,raw={}) {
+export function queryMap(original,raw={},context={}) {
   const q=querySchema.parse(raw), map=structuredClone(original), {start,end}=range(q);
+  const today=DateTime.now().setZone(q.timezone).toISODate();
   const simulated=[];
   for(const ref of q.simulateEnable) {const e=resolve(map,ref);e.enabled=true;if(e.kind==='course' && academic(e))e.status='selected';simulated.push(e.id);}
   for (const [id,e] of map) if(e.kind==='course')map.set(id,courseInfo(e));
@@ -186,15 +187,20 @@ export function queryMap(original,raw={}) {
     put('summary',[...groups.values()]);
   }
   if(q.views.includes('tasks'))put('tasks',all.filter(e=>e.kind==='task' && matches(e)));
+  if(q.views.includes('changes')) {
+    const h=context.history?.(q.sinceRevision??0,q.offset,q.limit)??{items:[],total:0};
+    response.views.changes=h.items;
+    response.pagination.changes={total:h.total,offset:q.offset,limit:q.limit,hasMore:q.offset+h.items.length<h.total};
+  }
   if(q.views.includes('config'))put('config',all.filter(e=>e.kind==='term' && matches(e)).map(t=>{
     const date=start.setZone(t.timezone).toISODate();
     return {...t,activeTimetable:date<t.startDate||date>t.endDate?null:{date,...timetableAt(t,date)}};
   }));
   if(q.simulateEnable.length || q.views.some(v=>['agenda','conflicts','free','unscheduled'].includes(v))) {
     const agenda=timeline(map,q);
-    const coverage=coverageOf(map,agenda,start,end,simulated);
+    const coverage=coverageOf(map,agenda,start,end,simulated,today);
     const issues=coverage.issues;
-    response.coverage={...coverage,issues:issues.slice(q.offset,q.offset+q.limit),pagination:{total:issues.length,offset:q.offset,limit:q.limit,hasMore:q.offset+q.limit<issues.length}};
+    response.coverage={...coverage,issues:issues.slice(q.offset,q.offset+q.limit),issuesOutsideRange:coverage.issuesOutsideRange.slice(q.offset,q.offset+q.limit),pagination:{total:issues.length,offset:q.offset,limit:q.limit,hasMore:q.offset+q.limit<issues.length}};
     if(simulated.length) {
       const baseline=conflicts(timeline(original,q)), after=conflicts(agenda);
       const key=c=>JSON.stringify([...[c.a,c.b].sort(),c.start,c.end]);
@@ -218,7 +224,7 @@ function putEntity(map,raw) {
 }
 export class Engine {
   constructor(store){this.store=store;}
-  query(raw){return this.store.read((map,revision)=>({...queryMap(map,raw),revision}));}
+  query(raw){return this.store.read((map,revision)=>({...queryMap(map,raw,{history:(since,offset,limit)=>this.store.history(since,offset,limit)}),revision}));}
   mutate(raw){
     const input=mutateSchema.parse(raw);
     return this.store.transact('mutate',input,input.dryRun,map=>{

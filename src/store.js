@@ -26,6 +26,14 @@ export class Store {
   }
   close() { this.db.close(); }
   revision() { return this.db.prepare('SELECT revision FROM state WHERE id=1').get().revision; }
+  // Audit trail as an incrementally consumable log: oldest first, so a caller can page forward
+  // and reuse the last revision it saw instead of re-reading every entity.
+  history(since = 0, offset = 0, limit = 200) {
+    const total = this.db.prepare('SELECT count(*) AS n FROM history WHERE revision > ?').get(since).n;
+    const items = this.db.prepare('SELECT revision, at, body FROM history WHERE revision > ? ORDER BY revision LIMIT ? OFFSET ?')
+      .all(since, limit, offset).map(row => ({ revision: row.revision, at: row.at, ...JSON.parse(row.body) }));
+    return { items, total };
+  }
   snapshot() { return new Map(this.db.prepare('SELECT id,body FROM entities ORDER BY id').all().map(r => [r.id, JSON.parse(r.body)])); }
   read(fn) {
     this.db.exec('BEGIN');
@@ -53,6 +61,14 @@ export class Store {
         .map(([id, after]) => ({id, before: before.get(id) ?? null, after}));
       const nextRevision = revision + (!dryRun && changes.length ? 1 : 0);
       const response = { ...result, revision: nextRevision, baseRevision: revision, dryRun, changed: changes.length };
+      // A write that asks for the changes view wants the diff of this call, which is only known here.
+      const pending = result?.query;
+      if (pending && Object.hasOwn(pending.views, 'changes')) {
+        const items = changes.length ? [{revision: nextRevision, at: new Date().toISOString(), kind, changes}] : [];
+        const {offset, limit} = pending.pagination.changes;
+        pending.views.changes = items.slice(offset, offset + limit);
+        pending.pagination.changes = {total: items.length, offset, limit, hasMore: offset + limit < items.length};
+      }
       if (dryRun) { this.db.exec('ROLLBACK'); return response; }
       const put = this.db.prepare('INSERT INTO entities(id,body) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body');
       for (const change of changes) put.run(change.id, JSON.stringify(change.after));

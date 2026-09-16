@@ -36,8 +36,16 @@ export const course = z.object({
   scheduleStatus: z.enum(['scheduled','partial','tbd','unknown']).optional().describe('Omitted: rules present => scheduled, empty => unknown. tbd only if source confirms undecided time; partial means some sessions are missing'),
   scheduleSource: z.object({ type: z.enum(['official','personal','unknown']), reference: z.string().max(2000).optional() }).strict().optional(),
   expectedTiming: z.object({ startWeek: z.number().int().min(1).max(60).optional(), endWeek: z.number().int().min(1).max(60).optional(),
-    date: date().optional(), durationWeeks: z.number().int().min(1).max(60).optional() }).strict().optional()
-    .describe('Known bounds for unspecified sessions, not exact occurrences. startWeek alone does not imply endWeek; durationWeeks is not a date range'),
+    date: date().optional(), durationWeeks: z.number().int().min(1).max(60).optional(),
+    window: z.object({ from: date(), to: date(), label: z.string().max(120).optional() }).strict().optional()
+      .describe('Soft expectation covering from and to; may lie outside the term, e.g. a summer placement held by a fall course. Not a confirmed occurrence and never a substitute for rules'),
+    source: z.enum(['official','personal','unknown']).optional().describe('Who states this expectation; personal or unknown never counts as official scheduling'),
+    confidence: z.enum(['high','medium','low']).optional().describe('How much the expectation can be trusted; lower confidence means more hedging is required'),
+    verifiedAt: date().optional().describe('Local date this expectation was last checked'),
+  }).strict().optional()
+    .describe('Known bounds for unspecified sessions, not exact occurrences. startWeek alone does not imply endWeek; durationWeeks is not a date range; window is a soft placement that may lie outside the term and must not be combined with date'),
+  acknowledge: z.object({ until: date(), note: z.string().max(500).optional() }).strict().optional()
+    .describe('Known and accepted gap: until this local date coverage still reports the missing time but marks it acknowledged, so it does not need explaining again'),
   status: z.enum(['candidate','selected','not_selected','dropped']).optional().describe('Enrollment state; omitted means unknown, independent of enabled'),
   credits: z.number().finite().nonnegative().optional(),
   hours: z.object({ total: z.number().finite().nonnegative().optional(), theory: z.number().finite().nonnegative().optional(), practice: z.number().finite().nonnegative().optional() }).strict().optional(),
@@ -66,7 +74,8 @@ export const entity = z.discriminatedUnion('kind', [term, course, event, task, e
 export const querySchema = z.object({
   from: date().optional(), to: date().optional().describe('Exclusive end date; default 7 days after from; max 120 days'),
   timezone: z.string().default('Asia/Shanghai').refine(v => DateTime.now().setZone(v).isValid),
-  views: z.array(z.enum(['agenda','catalog','tasks','conflicts','free','config','summary','unscheduled'])).default(['agenda']),
+  views: z.array(z.enum(['agenda','catalog','tasks','conflicts','free','config','summary','unscheduled','changes'])).default(['agenda']),
+  sinceRevision: z.number().int().nonnegative().optional().describe('changes view: return persisted changes with a higher revision, oldest first; in a write response the changes view always reports that write instead'),
   state: z.enum(['enabled','disabled','all']).default('enabled').describe('Disabled entries are excluded by default'),
   category: z.enum(['academic','activity']).optional(),
   scheduleStatus: z.enum(['scheduled','partial','tbd','unknown']).optional(),
