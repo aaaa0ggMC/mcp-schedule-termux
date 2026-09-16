@@ -228,14 +228,19 @@ export function queryMap(original,raw={},context={}) {
       }
     }
 
-    return searchMatch
-      && (q.state==='all'||(q.state==='enabled')===effective(e))
-      && (!given(q.category) || (e.kind==='course' && e.category===q.category))
-      && (!given(q.scheduleStatus) || (e.kind==='course' && e.scheduleStatus===q.scheduleStatus))
-      && (q.courseStatus==='all' || !given(q.courseStatus) || (e.kind==='course' && (e.status??'unknown')===q.courseStatus))
-      && (!given(q.termId) || (e.kind==='term'?e.id:e.termId)===q.termId)
-      && (!given(q.kinds) || q.kinds.includes(e.kind))
-      && (!given(q.ids) || q.ids.includes(e.entityId??e.id));
+    const stateMatch = q.state === 'all' || (q.state === 'enabled') === effective(e);
+    const kindMatch = !given(q.kinds) || q.kinds.includes(e.kind);
+    const idMatch = !given(q.ids) || q.ids.includes(e.entityId ?? e.id);
+    
+    // Soft termId filter: tasks and termless events pass through automatically
+    const termIdMatch = !given(q.termId) || e.kind === 'task' || (e.kind === 'event' && !e.termId) || (e.kind === 'term' ? e.id : e.termId) === q.termId;
+    
+    // Soft course filters: only apply to courses
+    const categoryMatch = !given(q.category) || e.kind !== 'course' || e.category === q.category;
+    const scheduleMatch = !given(q.scheduleStatus) || e.kind !== 'course' || e.scheduleStatus === q.scheduleStatus;
+    const courseStatusMatch = q.courseStatus === 'all' || !given(q.courseStatus) || e.kind !== 'course' || (e.status ?? 'unknown') === q.courseStatus;
+
+    return searchMatch && stateMatch && kindMatch && idMatch && termIdMatch && categoryMatch && scheduleMatch && courseStatusMatch;
   };
   const response={range:{from:start.toISODate(),to:end.toISODate(),timezone:q.timezone},simulated,views:{},pagination:{},
     ...(Object.keys(ignoredFilters).length?{ignoredFilters}:{})};
