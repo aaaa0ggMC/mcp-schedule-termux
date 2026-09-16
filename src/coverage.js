@@ -92,7 +92,9 @@ export function coverageOf(map,agenda,start,end,simulated=[],today=start.toISODa
           ...(ack?{acknowledgedUntil:ack.until, ...(ack.note?{acknowledgeNote:ack.note}:{})}:{}),
           expectedTiming:c.expectedTiming
         }));
-      } else if (gap) issuesOutsideRange.push(gapOf(c,status,{expectedTiming:c.expectedTiming}));
+      } else if (gap) {
+        issuesOutsideRange.push({ entityId: c.id, title: c.title, category: c.category ?? 'academic', scheduleStatus: status, reason: reasonOf(status), ...(c.status !== undefined ? { status: c.status } : {}) });
+      }
     }
     if (simulated.includes(c.id) && !active) issues.push({...gapOf(c,status),reason:'term_disabled'});
     if (simulated.includes(c.id) && active && !termInRange && !occurrenceIds.has(c.id)) issues.push({...gapOf(c,status),reason:'outside_term'});
