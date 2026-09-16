@@ -93,7 +93,12 @@ export function coverageOf(map,agenda,start,end,simulated=[],today=start.toISODa
           expectedTiming:c.expectedTiming
         }));
       } else if (gap) {
-        issuesOutsideRange.push({ entityId: c.id, title: c.title, category: c.category ?? 'academic', scheduleStatus: status, reason: reasonOf(status), ...(c.status !== undefined ? { status: c.status } : {}) });
+        issuesOutsideRange.push({
+          entityId: c.id, title: c.title, category: c.category ?? 'academic',
+          scheduleStatus: status, reason: reasonOf(status),
+          ...(c.status !== undefined ? { status: c.status } : {}),
+          ...(c.expectedTiming?.window?.label ? { expectedTime: c.expectedTiming.window.label } : {})
+        });
       }
     }
     if (simulated.includes(c.id) && !active) issues.push({...gapOf(c,status),reason:'term_disabled'});
