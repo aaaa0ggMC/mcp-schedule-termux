@@ -82,11 +82,11 @@ export const querySchema = z.object({
   sinceRevision: z.number().int().nonnegative().optional().describe('changes view: return persisted changes with a higher revision, oldest first; in a write response the changes view always reports that write instead'),
   state: z.enum(['enabled','disabled','all']).default('enabled').describe('Display filter: enabled (default) hides disabled entries, all shows both. Never changes what coverage counts'),
   category: z.enum(['academic','activity']).optional()
-    .describe('Display filter, courses only. Omit for both. Empty or omitted means no filter, and it also drops every non-course entry (term/event/task), so config plus this filter is always empty'),
+    .describe('Display filter, courses only. Omit for both. CRITICAL: If you specify this, it drops every non-course entry (term/event/task). Omit this if you want to see events/tasks in the agenda.'),
   scheduleStatus: z.enum(['scheduled','partial','tbd','unknown']).optional()
-    .describe('Display filter, courses only. Omit to see every status together; scheduled hides the courses whose time is only partial/tbd/unknown. CRITICAL: NEVER enumerate statuses in parallel queries. Omit the parameter instead.'),
+    .describe('Display filter, courses only. Omit to see every status together. CRITICAL: If you specify this, it drops every non-course entry (events/tasks). Omit the parameter instead of enumerating.'),
   courseStatus: z.enum(['candidate','selected','not_selected','dropped','unknown','all']).default('all')
-    .describe('Display filter, courses only. "all" (default) shows every status. CRITICAL: NEVER make multiple parallel queries to guess a course status. ALWAYS use "all" (or omit this parameter) if you are unsure of the status.'),
+    .describe('Display filter, courses only. "all" (default) shows every status. CRITICAL: If you specify a specific status like "selected", it drops all non-course entries (events/tasks). ALWAYS use "all" (or omit) when checking a general agenda or looking for events.'),
   termId: id().optional().describe('Filter courses/events and term config by term ID (an exact term ID or unique exact title). Omit it for every term - do not invent a placeholder such as ".", "*" or "any"; an unmatched value is ignored and reported instead of filtering'),
   search: z.string().optional().describe('Display filter: case insensitive substring over title/notes/tags/teacher/location. Omit or send "" for no search'),
   kinds: z.array(z.enum(['course','event','task','term','exception'])).optional()
