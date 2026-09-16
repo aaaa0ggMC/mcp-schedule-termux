@@ -1,0 +1,128 @@
+{
+  "namespace": "university-2026-autumn",
+  "requestId": "example-import-1",
+  "entries": [
+    {
+      "kind": "term",
+      "id": "2026-autumn",
+      "title": "2026 秋季学期",
+      "startDate": "2026-09-01",
+      "endDate": "2027-01-10",
+      "weekOne": "2026-08-31",
+      "timezone": "Asia/Shanghai",
+      "periods": [
+        {
+          "number": 1,
+          "start": "08:00",
+          "end": "08:45"
+        },
+        {
+          "number": 2,
+          "start": "08:55",
+          "end": "09:40"
+        }
+      ],
+      "source": {
+        "namespace": "university-2026-autumn",
+        "key": "term"
+      }
+    },
+    {
+      "kind": "course",
+      "id": "cpp",
+      "title": "C++",
+      "termId": "2026-autumn",
+      "enabled": false,
+      "teacher": "示例教师",
+      "location": "A101",
+      "tags": [
+        "选修"
+      ],
+      "rules": [
+        {
+          "weekday": 2,
+          "weeks": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16
+          ],
+          "periods": [
+            1,
+            2
+          ]
+        }
+      ],
+      "source": {
+        "namespace": "university-2026-autumn",
+        "key": "CPP-01"
+      },
+      "status": "not_selected",
+      "scheduleStatus": "scheduled",
+      "scheduleSource": {
+        "type": "official",
+        "reference": "示例公示课表，课堂 CPP-01；不是用户的真实课程时间"
+      }
+    },
+    {
+      "kind": "course",
+      "id": "math",
+      "title": "高等数学",
+      "termId": "2026-autumn",
+      "enabled": true,
+      "location": "B201",
+      "rules": [
+        {
+          "weekday": 1,
+          "weeks": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16
+          ],
+          "start": "10:00",
+          "end": "11:40"
+        }
+      ],
+      "source": {
+        "namespace": "university-2026-autumn",
+        "key": "MATH-01"
+      },
+      "status": "selected",
+      "scheduleStatus": "scheduled"
+    }
+  ],
+  "returnQuery": {
+    "from": "2026-09-14",
+    "to": "2026-09-21",
+    "views": [
+      "agenda",
+      "catalog"
+    ],
+    "state": "all"
+  }
+}
