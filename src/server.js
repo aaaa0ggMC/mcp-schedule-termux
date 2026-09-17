@@ -52,6 +52,29 @@ export function createMcp(engine) {
     time:'weekOne 为学期开始所在周周一；weeks 使用教学周编号。term.endDate 包含，query.to 不包含。课程节次形成从第一节开始到最后一节结束的连续占用。',
     scope:'v0.1 支持课程按教学周重复、单次活动和任务块。单次调整使用 exception；修改全部课程 rules 使用 patch。尚无通用 RRULE、提醒后台、网页抓取或未来某次起自动分割规则。',
   })}]}));
+  server.tool(
+    "kebiao_scripting_run",
+    "Execute arbitrary Javascript against the schedule engine API. Pre-injected variables: client, engine, console.",
+    {
+      code: z.string().describe("Javascript code to execute")
+    },
+    async (args) => {
+      const { runScript } = await import("./scripting.js");
+      const result = await runScript(engine, args.code);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+  server.tool(
+    "kebiao_scripting_man",
+    "View documentation for the schedule engine API methods available in scripting.",
+    {
+      query: z.string().optional().describe("Search query")
+    },
+    async (args) => {
+      const { scriptingMan } = await import("./scripting.js");
+      return { content: [{ type: "text", text: JSON.stringify(scriptingMan(args), null, 2) }] };
+    }
+  );
   return server;
 }
 export async function startHttp(engine,{host='127.0.0.1',port=3001,token,sessionTimeoutMs=30*60*1000}={}) {
