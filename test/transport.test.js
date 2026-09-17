@@ -16,7 +16,7 @@ test('official MCP clients initialize, list, write and query on both transports 
     const transport=kind==='http'?new StreamableHTTPClientTransport(new URL(`${base}/mcp`)):new SSEClientTransport(new URL(`${base}/sse`));
     try{
       await client.connect(transport);
-      const list=await client.listTools();assert.equal(list.tools.length,4);
+      const list=await client.listTools();assert.equal(list.tools.length,6);
       const write=await client.callTool({name:'schedule_mutate',arguments:{operations:[{op:'put',entity:{id:`${kind}-event`,kind:'event',title:'MCP test',start:'2026-09-15T10:00:00+08:00',end:'2026-09-15T11:00:00+08:00'}}]}});
       assert.equal(write.isError,undefined);assert.equal(write.structuredContent.changed,1);
       const query=await client.callTool({name:'schedule_query',arguments:{from:'2026-09-15',to:'2026-09-16'}});
@@ -36,7 +36,7 @@ test('optional bearer auth protects both transport endpoints',async t=>{
   assert.equal((await fetch(`${base}/mcp`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,401);
   assert.equal((await fetch(`${base}/health`,{headers:{Authorization:'Bearer test-only'}})).status,200);
   const client=new Client({name:'auth-test',version:'1.0.0'}),transport=new StreamableHTTPClientTransport(new URL(`${base}/mcp`),{requestInit:{headers:{Authorization:'Bearer test-only'}}});
-  try{await client.connect(transport);assert.equal((await client.listTools()).tools.length,4);}finally{await transport.terminateSession();await client.close();}
+  try{await client.connect(transport);assert.equal((await client.listTools()).tools.length,6);}finally{await transport.terminateSession();await client.close();}
 });
 
 test('MCP advertises and executes named timetable operations over HTTP and SSE',async t=>{

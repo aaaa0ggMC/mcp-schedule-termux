@@ -1,3 +1,12 @@
+export function compileScript(code, scopeKeys) {
+  const trimmed = code.trim();
+  try {
+    return new Function(...scopeKeys, `return (async () => (${trimmed}))()`);
+  } catch {
+    return new Function(...scopeKeys, `return (async () => { ${trimmed} })()`);
+  }
+}
+
 export async function runScript(engine, code) {
   const startTime = Date.now();
   const logs = [];
@@ -10,9 +19,9 @@ export async function runScript(engine, code) {
 
   const client = {
     query: (opts) => engine.query(opts),
-    save: (items) => engine.save(items),
-    delete: (ids) => engine.delete(ids),
-    simulate: (termId, additions) => engine.simulate(termId, additions),
+    mutate: (input) => engine.mutate(input),
+    import: (input) => engine.import(input),
+    plan: (input) => engine.plan(input),
     store: engine.store,
   };
 
@@ -20,18 +29,8 @@ export async function runScript(engine, code) {
   const scopeKeys = Object.keys(scope);
   const scopeValues = Object.values(scope);
 
-  const trimmedCode = code.trim();
-  let fnBody;
-  if (!trimmedCode.includes("return ") && !trimmedCode.includes("const ") && !trimmedCode.includes("let ") && !trimmedCode.includes("var ")) {
-    fnBody = `return (async () => { return (${trimmedCode}); })()`;
-  } else if (!trimmedCode.includes("return ")) {
-    fnBody = `return (async () => { ${trimmedCode} })()`;
-  } else {
-    fnBody = `return (async () => { ${trimmedCode} })()`;
-  }
-
   try {
-    const compiledFn = new Function(...scopeKeys, fnBody);
+    const compiledFn = compileScript(code, scopeKeys);
     const rawResult = await compiledFn(...scopeValues);
     return {
       success: true,
@@ -51,11 +50,16 @@ export async function runScript(engine, code) {
 
 export function scriptingMan(options = {}) {
   const docs = [
-    { method: "client.query(opts)", desc: "Query schedule (from, to, catalogs, tz, returnEvents, mergeTasks, includeSimulation...)" },
-    { method: "client.save(items)", desc: "Save terms, courses, activities, etc." },
-    { method: "client.delete(ids)", desc: "Delete items by ID" },
-    { method: "client.simulate(termId, additions)", desc: "Simulate additions on a term" },
-    { method: "client.store", desc: "Access the raw SQLite store methods" },
+    { method: "client.query(opts)", desc: "Read the timetable. opts: from, to, timezone, dayStart/dayEnd, views, returnEvents, mergeTasks, includeSimulation..." },
+    { method: "client.mutate({ operations, dryRun })", desc: "Write. Operations: put, patch, enable, set_timetable, switch_timetable; dryRun previews without committing" },
+    { method: "client.import({ namespace, entries, dryRun })", desc: "Import external entries; every entry needs source.key" },
+    { method: "client.plan({ from, to, tasks, newTasks, commit })", desc: "Lay out tasks into free slots; commit=false previews the blocks" },
+    { method: "client.store", desc: "Raw SQLite store: revision(), history(), ..." },
+    { method: "engine", desc: "The engine instance behind client, for the same query/mutate/import/plan methods" },
   ];
+  if (options.query) {
+    const q = String(options.query).toLowerCase();
+    return docs.filter((d) => d.method.toLowerCase().includes(q) || d.desc.toLowerCase().includes(q));
+  }
   return { title: "Schedule Scripting API", docs };
 }

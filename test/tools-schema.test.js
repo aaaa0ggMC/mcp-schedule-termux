@@ -20,7 +20,7 @@ test('tools/list describes every tool without $ref', async () => {
     const { tools } = await client.listTools();
     const json = JSON.stringify(tools);
 
-    assert.equal(tools.length, 4);
+    assert.equal(tools.length, 6);
     for (const keyword of ['"$ref"', '"$defs"', '"definitions"']) {
       assert.equal(json.includes(keyword), false, `${keyword} must not reach a client`);
     }

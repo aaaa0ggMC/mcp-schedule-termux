@@ -8,6 +8,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { resolve as pathResolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { z } from 'zod';
 import { Store } from './store.js';
 import { Engine } from './engine.js';
 import { querySchema, mutateSchema, importSchema, planSchema } from './schema.js';
@@ -54,7 +55,7 @@ export function createMcp(engine) {
   })}]}));
   server.tool(
     "kebiao_scripting_run",
-    "Execute arbitrary Javascript against the schedule engine API. Pre-injected variables: client, engine, console.",
+    "Execute arbitrary Javascript against the schedule engine API. Pre-injected variables: client (query / mutate / import / plan / store), engine, console.",
     {
       code: z.string().describe("Javascript code to execute")
     },
