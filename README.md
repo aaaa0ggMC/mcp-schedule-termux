@@ -50,6 +50,25 @@ node src/server.js --stdio
 
 可选 `KEBIAO_TOKEN`：客户端添加 `Authorization: Bearer <token>`。监听非回环地址时必须配置 token；公网部署自行提供 HTTPS。不要把 token 写入课表数据。
 
+### 通过 mcphub 接入时，令牌在 hub 那一侧
+
+上面的 `KEBIAO_TOKEN` 只对**本服务自己的 HTTP 端口**有效。如果 kebiao 是被 mcphub 用 stdio 拉起来的
+（`servers.json` 里 `command: node`、`args: ["src/server.js","--stdio"]`），那道检查形同虚设：
+stdio 上不存在「客户端凭证」这个概念 —— 谁拉进程，谁就能设进程的环境变量，
+后端检查自己持有的环境变量等于自己检查自己。客户端唯一拿得出手、hub 又能看到的是**请求头**。
+
+所以走 hub 时门禁在适配器里：`mcp-hub/mcps/kebiao/index.ts`。
+
+| | |
+|---|---|
+| 令牌来源 | `servers.json` 里这个条目的 `env.KEBIAO_TOKEN` |
+| 客户端怎么带 | `X-Kebiao-Token: <token>`，或与本服务 HTTP 路径一致的 `Authorization: Bearer <token>` |
+| 不带会怎样 | 整个会话被拒（`-32001`），连 `initialize` / `tools/list` 都不给 |
+| 换令牌之后 | 要重启这个服务（`POST /api/servers/kebiao/restart`）；已建立的会话仍持有旧令牌 |
+
+会话中途改请求头里的令牌不会生效（后端进程建立时就定了），适配器会明确报错让你重开会话，
+而不是按旧权限继续。令牌请用随机值，不要复用别处的密码。
+
 ## 给 LLM 的 4 个工具
 
 | 工具 | 一次调用能做什么 |
